@@ -1,0 +1,36 @@
+# AI Interview Platform Backend Requirements
+
+# Core Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# LangChain & LLM
+langchain==0.3.26
+langchain-openai==0.3.35
+langchain-core==0.3.79
+
+# Data Validation
+pydantic==2.11.7
+
+# Environment Management
+python-dotenv==1.1.1
+
+# WebSocket Support
+websockets==14.1
+
+# HTTP Client (optional, for testing)
+httpx==0.28.1
+
+# OpenAI SDK
+openai>=1.0.0
+
+# Numerical Computing
+numpy>=1.24.0
+
+# Local Speech Recognition and TTS (No API Key Required!)
+openai-whisper>=20250625  # Local Whisper STT
+pyttsx3>=2.99             # Local TTS
+pydub>=0.25.1             # Audio processing
+soundfile>=0.13.1         # Audio file reading (no ffmpeg needed)
+librosa>=0.11.0           # Audio processing and resampling

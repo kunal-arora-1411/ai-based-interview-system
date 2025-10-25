@@ -1,0 +1,8 @@
+{
+  "name": "AI Interview Platform",
+  "description": "An advanced AI-powered platform to practice interviews, build confidence, and receive detailed feedback to help you land your dream job.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
