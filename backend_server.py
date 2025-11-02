@@ -27,7 +27,8 @@ import tempfile
 import time
 from datetime import datetime
 from dotenv import load_dotenv
-import whisper
+# import whisper
+import requests
 import pyttsx3
 import threading
 import soundfile as sf
@@ -152,19 +153,7 @@ def initialize_chain_manager() -> InterviewChainManager:
     )
 
 # Global Whisper model (loaded once for performance)
-whisper_model = None
 
-def get_whisper_model():
-    """Load Whisper model (cached globally)"""
-    global whisper_model
-    if whisper_model is None:
-        # Load base model (faster, good accuracy)
-        # Options: tiny, base, small, medium, large
-        model_size = os.getenv("WHISPER_MODEL", "base")
-        print(f"Loading Whisper model: {model_size}...")
-        whisper_model = whisper.load_model(model_size)
-        print("Whisper model loaded!")
-    return whisper_model
 
 # ============================================================================
 # REST API Endpoints
@@ -449,192 +438,53 @@ async def upload_cv(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process CV: {str(e)}")
 
-@app.post("/api/jd/parse")
-async def parse_job_description(jd: JobDescriptionUpload):
-    """
-    Parse job description text
-    """
-    try:
-        # For now, return mock parsing result
-        # In production, you'd use NLP to extract requirements
-        return {
-            "success": True,
-            "required_skills": [
-                "Python", "React", "System Design", "Communication",
-                "Problem Solving", "Leadership"
-            ],
-            "experience_required": "3-5 years",
-            "role_level": "Mid-Senior"
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse JD: {str(e)}")
-
-@app.delete("/api/interviews/{session_id}")
-async def end_interview(session_id: str):
-    """
-    End an interview session
-    """
-    try:
-        session = session_manager.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        session_manager.delete_session(session_id)
-
-        return {
-            "success": True,
-            "message": "Interview session ended",
-            "session_id": session_id
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to end interview: {str(e)}")
-
-# ============================================================================
-# Speech-to-Text (Whisper) Endpoint
-# ============================================================================
-
 @app.post("/api/speech/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """
-    Transcribe audio using local Whisper model
-
-    Accepts audio files (mp3, mp4, mpeg, mpga, m4a, wav, webm)
-    Returns transcribed text
+    Transcribe audio using Groq Whisper-large-v3 API (safe file handling)
     """
     try:
-        # Get Whisper model
-        model = get_whisper_model()
-
-        # Read audio file
+        # Save uploaded audio temporarily
         audio_data = await file.read()
+        temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+        temp_path.write(audio_data)
+        temp_path.close()
 
-        # Create a temporary file with the correct extension
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'webm'
+        headers = {
+            "Authorization": f"Bearer {os.getenv('LLM_API_KEY')}",
+        }
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_file:
-            temp_file.write(audio_data)
-            temp_file_path = temp_file.name
+        # Use 'with open()' to ensure file closes properly before deletion
+        with open(temp_path.name, "rb") as audio_file:
+            files = {
+                "file": (file.filename, audio_file, "audio/webm"),
+                "model": (None, "whisper-large-v3"),
+            }
 
-        # Store paths for cleanup
-        wav_path = None
+            response = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files=files
+            )
 
-        try:
-            # For WebM files, try direct transcription first (Whisper handles it if ffmpeg is available)
-            if file_extension == 'webm':
-                try:
-                    # Let Whisper handle the WebM file directly
-                    result = model.transcribe(temp_file_path, fp16=False)
-                    transcript = result["text"].strip()
+        # Safe to delete now that the file is closed
+        os.unlink(temp_path.name)
 
-                    return {
-                        "success": True,
-                        "text": transcript,
-                        "filename": file.filename,
-                        "language": result.get("language", "unknown")
-                    }
-                except Exception as webm_error:
-                    print(f"⚠️ WebM direct transcription failed: {webm_error}")
-                    print("💡 Trying alternative audio processing...")
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
 
-                    # Try pydub conversion as fallback
-                    try:
-                        audio = AudioSegment.from_file(temp_file_path, format='webm')
-                        wav_path = temp_file_path.replace('.webm', '.wav')
-                        audio.export(wav_path, format='wav')
+        data = response.json()
 
-                        # Read with soundfile
-                        audio_data, sample_rate = sf.read(wav_path)
-
-                        # Convert to mono if stereo
-                        if len(audio_data.shape) > 1:
-                            audio_data = audio_data.mean(axis=1)
-
-                        # Resample to 16kHz if needed
-                        if sample_rate != 16000:
-                            import librosa
-                            audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
-
-                        # Normalize to float32
-                        audio_data = audio_data.astype(np.float32)
-
-                        # Transcribe
-                        result = model.transcribe(audio_data, fp16=False)
-                        transcript = result["text"].strip()
-
-                        return {
-                            "success": True,
-                            "text": transcript,
-                            "filename": file.filename,
-                            "language": result.get("language", "unknown")
-                        }
-                    except Exception as conv_error:
-                        print(f"❌ Audio conversion failed: {conv_error}")
-                        raise HTTPException(
-                            status_code=500,
-                            detail="WebM audio processing failed. Please install FFmpeg or use a different audio format."
-                        )
-            else:
-                # For non-WebM formats, use soundfile directly
-                try:
-                    audio_data, sample_rate = sf.read(temp_file_path)
-
-                    # Convert to mono if stereo
-                    if len(audio_data.shape) > 1:
-                        audio_data = audio_data.mean(axis=1)
-
-                    # Resample to 16kHz if needed
-                    if sample_rate != 16000:
-                        import librosa
-                        audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
-
-                    # Normalize to float32
-                    audio_data = audio_data.astype(np.float32)
-
-                    # Transcribe
-                    result = model.transcribe(audio_data, fp16=False)
-                    transcript = result["text"].strip()
-
-                    return {
-                        "success": True,
-                        "text": transcript,
-                        "filename": file.filename,
-                        "language": result.get("language", "unknown")
-                    }
-                except Exception as audio_error:
-                    print(f"Audio processing error: {audio_error}")
-                    # Fallback to Whisper's built-in loader
-                    result = model.transcribe(temp_file_path, fp16=False)
-                    transcript = result["text"].strip()
-
-                    return {
-                        "success": True,
-                        "text": transcript,
-                        "filename": file.filename,
-                        "language": result.get("language", "unknown")
-                    }
-
-        finally:
-            # Clean up temp files with proper error handling
-            time.sleep(0.1)  # Small delay to ensure file handles are released
-
-            if wav_path and os.path.exists(wav_path):
-                try:
-                    os.unlink(wav_path)
-                except Exception as e:
-                    print(f"⚠️ Could not delete temp WAV file: {e}")
-
-            if os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                except Exception as e:
-                    print(f"⚠️ Could not delete temp file: {e}")
+        return {
+            "success": True,
+            "text": data.get("text", "").strip(),
+            "filename": file.filename,
+            "language": data.get("language", "unknown")
+        }
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to transcribe audio: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to transcribe audio via Groq: {str(e)}")
+
 
 # ============================================================================
 # Text-to-Speech (TTS) Endpoint
