@@ -518,7 +518,7 @@ class InterviewSession:
 # ============================================================================
 
 def main():
-    """Main entry point for the interview system"""
+    """Main entry point for the Interview System"""
     parser = argparse.ArgumentParser(
         description="LangChain-based Interactive Interview (theory-only)"
     )
