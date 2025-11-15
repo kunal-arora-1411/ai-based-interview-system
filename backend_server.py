@@ -57,7 +57,7 @@ app = FastAPI(
 # CORS middleware - allow frontend to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -720,11 +720,11 @@ if __name__ == "__main__":
     import uvicorn
 
     print("\n" + "="*60)
-    print("🚀 AI Interview Platform Backend Server")
+    print("AI Interview Platform Backend Server")
     print("="*60)
-    print(f"📡 API Server: http://localhost:8000")
-    print(f"📚 API Docs: http://localhost:8000/docs")
-    print(f"🎨 Frontend: http://localhost:5173")
+    print(f"API Server: http://localhost:8000")
+    print(f"API Docs: http://localhost:8000/docs")
+    print(f"Frontend: http://localhost:5173")
     print("="*60 + "\n")
 
     uvicorn.run(
